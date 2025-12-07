@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Speech → Text (English & Hindi) — Demo</title>
+  <style>
+    :root{font-family:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial;line-height:1.4}
+    body{max-width:900px;margin:36px auto;padding:20px}
+    h1{margin:0 0 12px}
+    .controls{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0 18px}
+    button{padding:8px 12px;border-radius:8px;border:1px solid #ccc;background:#fafafa;cursor:pointer}
+    button.primary{background:#0b74de;color:#fff;border-color:#0865b3}
+    select,input{padding:8px;border-radius:8px;border:1px solid #ccc}
+    #log{white-space:pre-wrap;background:#f6f8fa;padding:12px;border-radius:8px;border:1px solid #eee;min-height:160px}
+    .small{font-size:0.9rem;color:#555}
+    .row{display:flex;gap:8px;align-items:center}
+  </style>
+</head>
+<body>
+  <h1>Speech → Text (English & Hindi)</h1>
+  <p class="small">Uses the browser Web Speech API. Choose language, press Start, speak. Works best in Chrome.</p>
+
+  <div class="controls">
+    <label>
+      Language:
+      <select id="langSelect">
+        <option value="en-US">English — US (en-US)</option>
+        <option value="en-GB">English — UK (en-GB)</option>
+        <option value="hi-IN">Hindi — India (hi-IN)</option>
+        <!-- Add more if you want (es-ES, fr-FR, etc.) -->
+      </select>
+    </label>
+
+    <label class="row">
+      <input type="checkbox" id="continuous" checked />
+      <span class="small" style="margin-left:6px">Continuous</span>
+    </label>
+
+    <label class="row">
+      <input type="checkbox" id="interim" checked />
+      <span class="small" style="margin-left:6px">Show interim results</span>
+    </label>
+
+    <button id="startBtn" class="primary">Start</button>
+    <button id="stopBtn" disabled>Stop</button>
+    <button id="clearBtn">Clear</button>
+    <button id="copyBtn">Copy</button>
+    <button id="downloadBtn">Download TXT</button>
+  </div>
+
+  <div>
+    <strong>Transcript</strong>
+    <div id="log" aria-live="polite"></div>
+  </div>
+
+  <hr />
+
+  <h3 class="small">If your browser does not support live speech recognition</h3>
+  <p class="small">Use the recorder below to capture audio (you can later send it to any speech-to-text service or your server for transcription).</p>
+
+  <div class="controls">
+    <button id="recStart">Record</button>
+    <button id="recStop" disabled>Stop & Save</button>
+    <a id="downloadAudio" style="display:none" download="recording.webm">Download recording</a>
+  </div>
+
+  <script>
+    // --- Feature detection ---
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition || null;
+    const langSelect = document.getElementById('langSelect');
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    const copyBtn = document.getElementById('copyBtn');
+    const downloadBtn = document.getElementById('downloadBtn');
+    const continuousCheckbox = document.getElementById('continuous');
+    const interimCheckbox = document.getElementById('interim');
+    const logDiv = document.getElementById('log');
+
+    let recognition = null;
+    let finalTranscript = '';
+
+    function appendLog(text, isInterim = false){
+      // show interim differently if needed
+      if(isInterim){
+        // show interim below the final transcript
+        logDiv.innerHTML = escapeHtml(finalTranscript) + '<span style="opacity:0.6"> ' + escapeHtml(text) + '</span>';
+      } else {
+        finalTranscript += (finalTranscript ? '\n' : '') + text;
+        logDiv.textContent = finalTranscript;
+      }
+    }
+
+    function escapeHtml(s){
+      return s.replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
+    }
+
+    if(!SpeechRecognition){
+      // feature not available
+      startBtn.disabled = true;
+      stopBtn.disabled = true;
+      logDiv.textContent = "SpeechRecognition not supported in this browser. Use Chrome (desktop or Android) or use the recorder below and send the audio to a server/model for transcription.";
+    } else {
+      recognition = new SpeechRecognition();
+      recognition.continuous = continuousCheckbox.checked;
+      recognition.interimResults = interimCheckbox.checked;
+      recognition.lang = langSelect.value;
+
+      recognition.onstart = () => {
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+        logDiv.classList.add('listening');
+      };
+
+      recognition.onerror = (e) => {
+        console.error('Recognition error', e);
+        // show a friendly message
+        if(e.error === 'not-allowed' || e.error === 'security'){
+          logDiv.textContent = 'Microphone access denied. Please allow microphone permission and try again.';
+        } else {
+          logDiv.textContent = 'Recognition error: ' + e.error;
+        }
+        startBtn.disabled = false;
+        stopBtn.disabled = true;
+      };
+
+      recognition.onend = () => {
+        startBtn.disabled = false;
+        stopBtn.disabled = true;
+        // If continuous is true, Chrome sometimes stops; we won't auto-restart here.
+      };
+
+      recognition.onresult = (event) => {
+        let interim = '';
+        for(let i = event.resultIndex; i < event.results.length; ++i){
+          const transcript = event.results[i][0].transcript.trim();
+          if(event.results[i].isFinal){
+            appendLog(transcript, false);
+          } else {
+            interim += transcript + ' ';
+          }
+        }
+        if(interim && interimCheckbox.checked){
+          appendLog(interim, true);
+        } else {
+          // ensure finalTranscript shown if no interim
+          logDiv.textContent = finalTranscript;
+        }
+      };
+
+      // Keep settings in sync with controls:
+      langSelect.addEventListener('change', () => { recognition.lang = langSelect.value; });
+      continuousCheckbox.addEventListener('change', () => { recognition.continuous = continuousCheckbox.checked; });
+      interimCheckbox.addEventListener('change', () => { recognition.interimResults = interimCheckbox.checked; });
+    }
+
+    startBtn.addEventListener('click', async () => {
+      if(!SpeechRecognition){
+        alert('SpeechRecognition not supported in this browser. Use Chrome.');
+        return;
+      }
+      try {
+        // ensure microphone permission requested
+        await navigator.mediaDevices.getUserMedia({ audio: true });
+        recognition.lang = langSelect.value;
+        recognition.interimResults = interimCheckbox.checked;
+        recognition.continuous = continuousCheckbox.checked;
+        recognition.start();
+      } catch (err){
+        console.error(err);
+        alert('Microphone permission required. Please allow and try again.');
+      }
+    });
+
+    stopBtn.addEventListener('click', () => {
+      if(recognition) recognition.stop();
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+    });
+
+    clearBtn.addEventListener('click', () => {
+      finalTranscript = '';
+      logDiv.textContent = '';
+    });
+
+    copyBtn.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(finalTranscript);
+        copyBtn.textContent = 'Copied ✓';
+        setTimeout(()=> copyBtn.textContent = 'Copy', 1400);
+      } catch (e){
+        alert('Copy failed: ' + e.message);
+      }
+    });
+
+    downloadBtn.addEventListener('click', () => {
+      const blob = new Blob([finalTranscript], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'transcript.txt';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    });
+
+    // --- MediaRecorder fallback (record audio file) ---
+    let mediaRecorder, recordedChunks = [];
+    const recStart = document.getElementById('recStart');
+    const recStop = document.getElementById('recStop');
+    const downloadAudio = document.getElementById('downloadAudio');
+
+    recStart.addEventListener('click', async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        recordedChunks = [];
+        mediaRecorder = new MediaRecorder(stream);
+        mediaRecorder.ondataavailable = e => { if(e.data.size > 0) recordedChunks.push(e.data); };
+        mediaRecorder.onstop = () => {
+          const blob = new Blob(recordedChunks, { type: 'audio/webm' });
+          const url = URL.createObjectURL(blob);
+          downloadAudio.href = url;
+          downloadAudio.style.display = 'inline-block';
+          downloadAudio.textContent = 'Download recording';
+          // Also attach blob to the element for later uploading:
+          downloadAudio.dataset.blobUrl = url;
+          // Optionally: show an example hint to send this file to server for transcription.
+          logDiv.textContent = 'Recording ready. Download and upload to your transcription service or use a server-side model.';
+        };
+        mediaRecorder.start();
+        recStart.disabled = true;
+        recStop.disabled = false;
+      } catch (err) {
+        alert('Microphone access is required to record. Error: ' + err.message);
+      }
+    });
+
+    recStop.addEventListener('click', () => {
+      if(mediaRecorder && mediaRecorder.state !== 'inactive'){
+        mediaRecorder.stop();
+        recStart.disabled = false;
+        recStop.disabled = true;
+      }
+    });
+
+    // Accessibility: allow Enter/Space to trigger start
+    startBtn.addEventListener('keyup', e => { if(e.key === 'Enter') startBtn.click(); });
+
+  </script>
+</body>
+</html>
